@@ -1,0 +1,17 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Node (scratchpad 설치용)
+node_modules/
+
+# 중간 산출물 (최종본은 todo_list_pdf.html)
+planner_v1.html
+planner_v2.html
+planner_cal_v1.html
+planner_cal_v2.html

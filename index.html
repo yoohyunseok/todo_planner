@@ -838,6 +838,13 @@
     /* ═══════════════════════════════
        LIST AREA
     ═══════════════════════════════ */
+    #db-loading {
+      text-align: center;
+      padding: 56px 24px;
+      color: var(--text-muted);
+      font-size: 0.875rem;
+    }
+
     #all-done-banner {
       display: none;
       text-align: center;
@@ -1398,6 +1405,7 @@
 
   <!-- ── 목록 영역 ── -->
   <main id="list-area">
+    <div id="db-loading">데이터를 불러오는 중…</div>
     <div id="all-done-banner" role="status" aria-live="polite">모든 할 일을 완료했습니다! 🎉</div>
 
     <!-- 달력 날짜 필터 활성 시 배너 -->
@@ -1420,9 +1428,17 @@
 
   <script>
     /* ── 상수 ── */
-    var STORAGE_KEY      = 'planner-todos';
     var STORAGE_SORT_KEY = 'planner-todos-sort';
     var VALID_CATS       = ['업무', '개인', '공부'];
+
+    /* ── Supabase 설정 ── */
+    var SUPABASE_URL = 'https://wudedicmuaqyvrwcyhft.supabase.co';
+    var SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind1ZGVkaWNtdWFxeXZyd2N5aGZ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzNDkyNTQsImV4cCI6MjA5NzkyNTI1NH0.lnEwaCi7gvihRlXpG8TfjyQziwZHOdDMLD78MtpfNlQ';
+    var SB_HEADERS   = {
+      'apikey':        SUPABASE_KEY,
+      'Authorization': 'Bearer ' + SUPABASE_KEY,
+      'Content-Type':  'application/json',
+    };
 
     /* ── 키워드 → 카테고리 자동 분류 ── */
     var KEYWORD_MAP = {
@@ -1490,13 +1506,74 @@
       return typeof v === 'string' && DEADLINE_RE.test(v);
     }
 
-    /* ── localStorage ── */
+    /* ── Supabase API ── */
 
-    function loadTodos() {
-      try {
-        var raw = localStorage.getItem(STORAGE_KEY);
-        return raw ? sanitize(JSON.parse(raw)) : [];
-      } catch (e) { return []; }
+    function sbFetch() {
+      return fetch(SUPABASE_URL + '/rest/v1/tasks?select=*&order=created_at.asc', {
+        headers: SB_HEADERS,
+      }).then(function(r) { return r.json(); })
+        .then(function(rows) {
+          return rows.map(function(r) {
+            return {
+              id:        r.id,
+              text:      r.text,
+              category:  r.category,
+              completed: r.completed,
+              createdAt: r.created_at,
+              deadline:  r.deadline || null,
+            };
+          });
+        });
+    }
+
+    function sbInsert(todo) {
+      fetch(SUPABASE_URL + '/rest/v1/tasks', {
+        method:  'POST',
+        headers: Object.assign({}, SB_HEADERS, { 'Prefer': 'return=minimal' }),
+        body: JSON.stringify({
+          id:         todo.id,
+          text:       todo.text,
+          category:   todo.category,
+          completed:  todo.completed,
+          created_at: todo.createdAt,
+          deadline:   todo.deadline,
+        }),
+      });
+    }
+
+    function sbUpdate(id, fields) {
+      fetch(SUPABASE_URL + '/rest/v1/tasks?id=eq.' + id, {
+        method:  'PATCH',
+        headers: Object.assign({}, SB_HEADERS, { 'Prefer': 'return=minimal' }),
+        body: JSON.stringify(fields),
+      });
+    }
+
+    function sbDelete(id) {
+      fetch(SUPABASE_URL + '/rest/v1/tasks?id=eq.' + id, {
+        method:  'DELETE',
+        headers: SB_HEADERS,
+      });
+    }
+
+    function sbDeleteMany(ids) {
+      if (!ids.length) return;
+      fetch(SUPABASE_URL + '/rest/v1/tasks?id=in.(' + ids.join(',') + ')', {
+        method:  'DELETE',
+        headers: SB_HEADERS,
+      });
+    }
+
+    function reloadFromDB() {
+      sbFetch().then(function(rows) {
+        todos = sanitize(rows);
+        hideDbLoading();
+        renderTodos();
+      }).catch(function(e) {
+        console.error('DB load failed:', e);
+        hideDbLoading();
+        renderTodos();
+      });
     }
 
     function sanitize(data) {
@@ -1517,10 +1594,6 @@
             deadline:  isValidDeadline(t.deadline) ? t.deadline : null,
           };
         });
-    }
-
-    function saveTodos(list) {
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch (e) { /* quota */ }
     }
 
     function loadSort() {
@@ -1550,7 +1623,7 @@
     }
 
     /* ── 앱 상태 ── */
-    var todos           = loadTodos();
+    var todos           = [];
     var editingId       = null;
     var activeFilter    = 'all';
     var activeSort      = loadSort();
@@ -1585,6 +1658,7 @@
     var _elCalendarContainer  = document.getElementById('calendar-container');
     var _elCalDateFilterBar   = document.getElementById('cal-date-filter-bar');
     var _elCalFilterLabelText = document.getElementById('cal-filter-label-text');
+    var _elDbLoading          = document.getElementById('db-loading');
 
     /* ── 날짜 바 초기화 ── */
     (function initTodayBar() {
@@ -2449,11 +2523,13 @@
     /* ── 액션 함수 ── */
 
     function toggleTodo(id) {
+      var newVal;
       todos = todos.map(function(t) {
-        return t.id === id ? Object.assign({}, t, { completed: !t.completed }) : t;
+        if (t.id === id) { newVal = !t.completed; return Object.assign({}, t, { completed: newVal }); }
+        return t;
       });
-      saveTodos(todos);
       renderTodos();
+      sbUpdate(id, { completed: newVal });
     }
 
     function startEdit(id) {
@@ -2469,18 +2545,19 @@
         if (hint) hint.textContent = '내용을 입력해 주세요.';
         return;
       }
+      var newDeadlineVal = isValidDeadline(newDeadline) ? newDeadline : null;
       todos = todos.map(function(t) {
         return t.id === id
           ? Object.assign({}, t, {
               text:     newText,
               category: newCategory,
-              deadline: isValidDeadline(newDeadline) ? newDeadline : null,
+              deadline: newDeadlineVal,
             })
           : t;
       });
       editingId = null;
-      saveTodos(todos);
       renderTodos();
+      sbUpdate(id, { text: newText, category: newCategory, deadline: newDeadlineVal });
     }
 
     function cancelEdit() {
@@ -2494,8 +2571,8 @@
       todos = todos.filter(function(t) { return t.id !== id; });
       if (editingId === id) editingId = null;
       selectedIds.delete(id);
-      saveTodos(todos);
       renderTodos();
+      sbDelete(id);
     }
 
     function deleteSelected() {
@@ -2503,14 +2580,15 @@
       if (count === 0) return;
       if (!confirm(count + '개 항목을 삭제하시겠습니까?')) return;
 
+      var idsToDelete = Array.from(selectedIds);
       if (editingId && selectedIds.has(editingId)) editingId = null;
       todos = todos.filter(function(t) { return !selectedIds.has(t.id); });
       selectedIds.clear();
 
       if (todos.length === 0) selectionMode = false;
 
-      saveTodos(todos);
       renderTodos();
+      sbDeleteMany(idsToDelete);
     }
 
     function addTodo() {
@@ -2529,9 +2607,10 @@
       _elTodoInput.classList.remove('invalid');
       _elHintText.style.display = 'none';
 
-      todos.push(createTodo(text, category, deadline));
-      saveTodos(todos);
+      var newTodo = createTodo(text, category, deadline);
+      todos.push(newTodo);
       renderTodos();
+      sbInsert(newTodo);
 
       _elTodoInput.value      = '';
       _elDeadlineInput.value  = '';
@@ -2545,6 +2624,12 @@
 
     function showBadge() { _elAutoCatBadge.classList.add('visible'); }
     function hideBadge() { _elAutoCatBadge.classList.remove('visible'); }
+
+    /* ── DB 로딩 상태 ── */
+
+    function hideDbLoading() {
+      if (_elDbLoading) _elDbLoading.style.display = 'none';
+    }
 
     /* ═══════════════════════════════════════════════════════
        EVENT WIRING
@@ -2628,7 +2713,7 @@
     });
 
     /* ── 초기 진입 ── */
-    renderTodos();
+    reloadFromDB();
   </script>
 </body>
 </html>

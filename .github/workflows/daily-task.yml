@@ -1,0 +1,68 @@
+name: Insert Daily Review Task
+
+on:
+  schedule:
+    - cron: '0 0 * * 1-5'  # 00:00 UTC Mon-Fri = 09:00 KST 평일
+  workflow_dispatch:        # 수동 실행 허용 (테스트용)
+
+jobs:
+  insert-task:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Insert 당일 복습 task into Supabase
+        run: |
+          python3 << 'EOF'
+          import urllib.request
+          import urllib.parse
+          import urllib.error
+          import json
+          import uuid
+          from datetime import datetime, timezone
+
+          SUPABASE_URL = "https://wudedicmuaqyvrwcyhft.supabase.co"
+          SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind1ZGVkaWNtdWFxeXZyd2N5aGZ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzNDkyNTQsImV4cCI6MjA5NzkyNTI1NH0.lnEwaCi7gvihRlXpG8TfjyQziwZHOdDMLD78MtpfNlQ"
+
+          AUTH_HEADERS = {
+              "apikey": SUPABASE_KEY,
+              "Authorization": f"Bearer {SUPABASE_KEY}",
+          }
+
+          today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+          # 오늘 이미 '당일 복습'이 있는지 확인
+          params = urllib.parse.urlencode({
+              "text": "eq.당일 복습",
+              "deadline": f"eq.{today}",
+              "select": "id",
+          })
+          check_req = urllib.request.Request(
+              f"{SUPABASE_URL}/rest/v1/tasks?{params}",
+              headers=AUTH_HEADERS,
+          )
+          existing = json.loads(urllib.request.urlopen(check_req).read())
+
+          if existing:
+              print(f"⏭ 이미 존재합니다: {today}")
+          else:
+              task = {
+                  "id": str(uuid.uuid4()),
+                  "text": "당일 복습",
+                  "category": "공부",
+                  "completed": False,
+                  "created_at": datetime.now(timezone.utc).isoformat(),
+                  "deadline": today,
+              }
+              insert_req = urllib.request.Request(
+                  f"{SUPABASE_URL}/rest/v1/tasks",
+                  data=json.dumps(task).encode(),
+                  headers={
+                      **AUTH_HEADERS,
+                      "Content-Type": "application/json",
+                      "Prefer": "return=minimal",
+                  },
+                  method="POST",
+              )
+              urllib.request.urlopen(insert_req)
+              print(f"✅ 삽입 완료: 당일 복습 ({today})")
+          EOF
